@@ -43,17 +43,19 @@ async def initialize_global_db() -> None:
         _async_session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
 
 async def get_engine() -> create_async_engine:
-    """Returns the global async engine, initializing it if necessary."""
-    await initialize_global_db()
-    if _engine is None: # Should not happen if initialize_global_db works
-        raise RuntimeError("Global engine not initialized after initialize_global_db call.")
+    """Returns the global async engine. Assumes initialize_global_db() has been called."""
+    if _engine is None:
+        raise RuntimeError(
+            "Global engine is not initialized. Call initialize_global_db() first."
+        )
     return _engine
 
 async def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
-    """Returns the global async session factory, initializing it if necessary."""
-    await initialize_global_db()
-    if _async_session_factory is None: # Should not happen
-        raise RuntimeError("Global session factory not initialized after initialize_global_db call.")
+    """Returns the global async session factory. Assumes initialize_global_db() has been called."""
+    if _async_session_factory is None:
+        raise RuntimeError(
+            "Global async session factory is not initialized. Call initialize_global_db() first."
+        )
     return _async_session_factory
 
 async def dispose_global_engine() -> None:

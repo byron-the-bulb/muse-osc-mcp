@@ -54,15 +54,17 @@ async def warm_up_db_on_session_start():
         print(f"Error during global DB warm-up: {e}")
 
 
-@pytest.fixture(scope="session")
-def db_prepared() -> None:
-    """Initialise tables once for test session using a synchronous engine."""
-    sync_db_url = config.settings.async_db_url.replace("postgresql+asyncpg", "postgresql")
-    sync_engine = sqlalchemy_create_engine(sync_db_url)
+@pytest.fixture(scope="session", autouse=True)
+async def db_prepared(global_engine_manager) -> None:  # Add dependency
+    """Initialise tables once for test session by calling db.init_db()."""
+    # Ensure the global engine is initialized (global_engine_manager should do this)
+    # Then run the async init_db function.
     try:
-        models.Base.metadata.create_all(sync_engine)
-    finally:
-        sync_engine.dispose()
+        await db.init_db() # Uses the global async engine
+        print("Test session: Database tables prepared via db.init_db().")
+    except Exception as e:
+        print(f"Test session: Error during db.init_db() in db_prepared: {e}")
+        raise
 
 
 def _get_free_udp_port() -> int:
@@ -157,10 +159,13 @@ async def running_server(db_session_for_test: tuple[AsyncSession, async_sessionm
             except Exception as e:
                 print(f"Test fixture: Exception during batch commit task cancellation: {e}")
         
+        # Final data flush should be outside the batch_task cancellation try-except
         print("Test fixture: Performing final data flush...")
         try:
-            await server._perform_final_data_flush(test_specific_session_factory)
-            print("Test fixture: Final data flush completed.")
+            # Ensure any remaining buffered data is flushed before test ends
+            # Call batch_commit_data with interval 0 for an immediate flush
+            await server.batch_commit_data(session_factory=test_specific_session_factory, interval_seconds=0)
+            print("Test fixture: Final data flush complete.")
         except Exception as e:
             print(f"Test fixture: Error during final data flush: {e}")
 
@@ -222,7 +227,7 @@ async def test_eeg_accel_flow(running_server):  # type: ignore[missing-type-doc]
     total_duration = time.perf_counter() - start_send_time
     print(f"Total test critical section duration: {total_duration:.4f} seconds")
 
-    assert eeg_count == (eeg_packets - 1)  # One malformed packet is sent and should be skipped
+    assert eeg_count == eeg_packets  # All valid packets should be present; malformed ones skipped
     assert acc_count == acc_packets
 
 

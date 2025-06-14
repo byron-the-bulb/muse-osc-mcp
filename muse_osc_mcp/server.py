@@ -444,8 +444,15 @@ async def main() -> None:
         # Decide if this is fatal or if the app can continue without warming
 
     try:
-        await init_db() # Ensure tables exist
-
+        logger.info("Ensuring database schema exists...")
+        try:
+            await init_db() # Ensure tables exist
+            logger.info("Database schema check/creation complete.")
+        except Exception as e:
+            logger.error(f"Failed to create database schema: {e}", exc_info=True)
+            logger.critical("Database schema creation failed. Cannot proceed.")
+            return
+        # Rest of the code remains the same
         rec_session = await create_recording_session()
 
         current_loop = asyncio.get_running_loop()
