@@ -222,7 +222,7 @@ async def test_eeg_accel_flow(running_server):  # type: ignore[missing-type-doc]
     total_duration = time.perf_counter() - start_send_time
     print(f"Total test critical section duration: {total_duration:.4f} seconds")
 
-    assert eeg_count >= eeg_packets  # malformed may be skipped
+    assert eeg_count == (eeg_packets - 1)  # One malformed packet is sent and should be skipped
     assert acc_count == acc_packets
 
 

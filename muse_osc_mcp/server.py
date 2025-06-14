@@ -62,10 +62,13 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
     global eeg_samples_buffer, acc_samples_buffer, freq_abs_samples_buffer, horseshoe_samples_buffer, touching_forehead_samples_buffer, blink_events_buffer, jaw_clench_events_buffer
     logger.info(f"Batch commit task started. Commit interval: {interval_seconds}s")
     while True:
-        if interval_seconds > 0: # Allow immediate flush if interval is 0
+        flush_type = "Periodic" if interval_seconds > 0 else "Immediate/Final"
+        print(f"[BCD] {flush_type} flush cycle starting...")
+        logger.info(f"{flush_type} flush cycle starting...")
+
+        if interval_seconds > 0:
             await asyncio.sleep(interval_seconds)
-        else:
-            logger.info("Batch commit task performing immediate flush (interval_seconds=0).")
+        # For immediate flush (interval_seconds == 0), proceed directly to buffer processing
 
         items_to_commit_eeg: List[EegSample] = []
         items_to_commit_acc: List[AccelerometerSample] = []
@@ -76,27 +79,35 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
         items_to_commit_jaw_clench: List[JawClenchEvent] = []
 
         # Atomically get and clear buffers
+        print(f"[BCD] {flush_type} flush: Checking buffers.")
         if eeg_samples_buffer:
             items_to_commit_eeg = list(eeg_samples_buffer)
             eeg_samples_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_eeg)} EEG samples from buffer.")
         if acc_samples_buffer:
             items_to_commit_acc = list(acc_samples_buffer)
             acc_samples_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_acc)} ACC samples from buffer.")
         if freq_abs_samples_buffer:
             items_to_commit_freq_abs = list(freq_abs_samples_buffer)
             freq_abs_samples_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_freq_abs)} FreqAbs samples from buffer.")
         if horseshoe_samples_buffer:
             items_to_commit_horseshoe = list(horseshoe_samples_buffer)
             horseshoe_samples_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_horseshoe)} Horseshoe samples from buffer.")
         if touching_forehead_samples_buffer:
             items_to_commit_touching_forehead = list(touching_forehead_samples_buffer)
             touching_forehead_samples_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_touching_forehead)} TouchingForehead samples from buffer.")
         if blink_events_buffer:
             items_to_commit_blink = list(blink_events_buffer)
             blink_events_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_blink)} Blink events from buffer.")
         if jaw_clench_events_buffer:
             items_to_commit_jaw_clench = list(jaw_clench_events_buffer)
             jaw_clench_events_buffer.clear()
+            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_jaw_clench)} JawClench events from buffer.")
 
         total_items_in_batch = (
             len(items_to_commit_eeg) + len(items_to_commit_acc) + len(items_to_commit_freq_abs) +
@@ -104,10 +115,13 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
             len(items_to_commit_blink) + len(items_to_commit_jaw_clench)
         )
 
+        print(f"[BCD] {flush_type} flush: Total items copied from all buffers: {total_items_in_batch}")
         if not total_items_in_batch:
             if interval_seconds == 0: # If it's an immediate flush, break after checking buffers once
+                print(f"[BCD] {flush_type} flush: No data in buffers to commit. Breaking loop for immediate flush.")
                 logger.info("Immediate flush: No data in buffers to commit.")
                 break
+            print(f"[BCD] {flush_type} flush: No data in buffers to commit. Continuing to next cycle.")
             # logger.debug("No data in buffers to commit.") # Can be noisy for periodic checks
             continue
 
@@ -139,8 +153,15 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                     num_committed_types +=1
                 
                 if num_committed_types > 0:
+                    print(f"[BCD] {flush_type} flush: Attempting to commit {total_items_in_batch} items to DB...")
                     await db_session.commit()
                     commit_duration = time.perf_counter() - commit_start_time
+                    print(
+                        f"[BCD] {flush_type} flush: Successfully committed {len(items_to_commit_eeg)} EEG, {len(items_to_commit_acc)} ACC, "
+                        f"{len(items_to_commit_freq_abs)} FreqAbs, {len(items_to_commit_horseshoe)} Horseshoe, "
+                        f"{len(items_to_commit_touching_forehead)} Touch, {len(items_to_commit_blink)} Blink, "
+                        f"{len(items_to_commit_jaw_clench)} Jaw Clench items. Total: {total_items_in_batch} in {commit_duration:.4f}s."
+                    )
                     logger.info(
                         f"Batch committed {len(items_to_commit_eeg)} EEG, {len(items_to_commit_acc)} ACC, "
                         f"{len(items_to_commit_freq_abs)} FreqAbs, {len(items_to_commit_horseshoe)} Horseshoe, "
@@ -148,9 +169,11 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                         f"{len(items_to_commit_jaw_clench)} Jaw Clench items. Total: {total_items_in_batch} in {commit_duration:.4f}s."
                     )
                 else:
+                    print(f"[BCD] {flush_type} flush: All buffers were empty after swapping, no commit needed.")
                     logger.debug("Batch commit: All buffers were empty after swapping.")
 
             except asyncio.CancelledError:
+                print(f"[BCD] {flush_type} flush: Task cancelled during DB operations. Re-buffering {total_items_in_batch} items.")
                 logger.info("Batch commit task cancelled during DB operations. Re-buffering data.")
                 # Re-add data to buffers if cancelled mid-operation to prevent data loss
                 eeg_samples_buffer = items_to_commit_eeg + eeg_samples_buffer
@@ -161,10 +184,12 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                 blink_events_buffer = items_to_commit_blink + blink_events_buffer
                 jaw_clench_events_buffer = items_to_commit_jaw_clench + jaw_clench_events_buffer
                 raise # Re-raise CancelledError to ensure task stops
-            except Exception:  # pylint: disable=broad-except
+            except Exception as e:  # pylint: disable=broad-except
+                print(f"[BCD] {flush_type} flush: EXCEPTION during batch commit: {e}. Data for this batch may be lost.")
                 logger.exception("Error during batch commit. Data for this batch may be lost.")
         
         if interval_seconds == 0: # If it's an immediate flush, break after one attempt
+            print(f"[BCD] {flush_type} flush: Immediate flush attempt complete. Breaking loop.")
             logger.info("Immediate flush attempt complete.")
             break
 
