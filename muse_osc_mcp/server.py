@@ -398,6 +398,7 @@ async def create_aiohttp_app() -> web.Application: # Renamed for clarity
 
 
 async def main() -> None:
+    global batch_commit_task_handle # Declare global at the start of the function
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s [%(funcName)s]: %(message)s" # Added funcName
@@ -454,7 +455,7 @@ async def main() -> None:
         logger.exception("Unhandled exception in main: %s", e)
     finally:
         # Gracefully shutdown batch commit task and flush remaining data
-        global batch_commit_task_handle
+        # global batch_commit_task_handle # Moved to the top of the function
         if batch_commit_task_handle and not batch_commit_task_handle.done():
             logger.info("Cancelling batch commit task...")
             batch_commit_task_handle.cancel()

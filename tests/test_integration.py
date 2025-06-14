@@ -104,29 +104,68 @@ async def db_session_for_test(monkeypatch) -> AsyncGenerator[tuple[AsyncSession,
 
 @pytest.fixture()
 async def running_server(db_session_for_test: tuple[AsyncSession, async_sessionmaker[AsyncSession]]) -> AsyncGenerator[int, None]:
-    """Run OSC server in background, yield port."""
+    """Run OSC server and batch commit task in background, yield port."""
     session, test_specific_session_factory = db_session_for_test
-
     port = _get_free_udp_port()
 
-    # Create recording session for user Tester, using configured session_user
+    # Create recording session
     rec = models.Session(user=config.settings.session_user)
     session.add(rec)
     await session.commit()
     await session.refresh(rec)
 
     current_loop = asyncio.get_running_loop()
-    task = asyncio.create_task(server.start_osc_server(port, rec, current_loop, test_specific_session_factory))
-    await asyncio.sleep(0.5)  # give it time to start
+    batch_task_handle_for_test: asyncio.Task | None = None
+    osc_server_task_for_test: asyncio.Task | None = None
+
     try:
+        # Start batch commit task
+        batch_task_handle_for_test = current_loop.create_task(
+            server.batch_commit_data(test_specific_session_factory, config.settings.batch_interval_seconds)
+        )
+        print("\nTest fixture: Batch commit task started.")
+
+        # Start OSC server task
+        osc_server_task_for_test = current_loop.create_task(
+            server.start_osc_server(port, rec, current_loop, test_specific_session_factory)
+        )
+        print(f"Test fixture: OSC server task starting on port {port}.")
+
+        await asyncio.sleep(0.8)  # Increased sleep to allow both tasks to initialize
+        print("Test fixture: Server and batch task should be running.")
         yield port
+
     finally:
-        task.cancel()
+        print("\nTest fixture: Tearing down server tasks...")
+        if osc_server_task_for_test and not osc_server_task_for_test.done():
+            print("Test fixture: Cancelling OSC server task...")
+            osc_server_task_for_test.cancel()
+            try:
+                await osc_server_task_for_test
+            except asyncio.CancelledError:
+                print("Test fixture: OSC server task successfully cancelled.")
+            except Exception as e:
+                print(f"Test fixture: Exception during OSC server task cancellation: {e}")
+        
+        if batch_task_handle_for_test and not batch_task_handle_for_test.done():
+            print("Test fixture: Cancelling batch commit task...")
+            batch_task_handle_for_test.cancel()
+            try:
+                await batch_task_handle_for_test
+            except asyncio.CancelledError:
+                print("Test fixture: Batch commit task successfully cancelled.")
+            except Exception as e:
+                print(f"Test fixture: Exception during batch commit task cancellation: {e}")
+        
+        print("Test fixture: Performing final data flush...")
         try:
-            await task
-        except asyncio.CancelledError:
-            pass # Expected upon cancellation
-        await asyncio.sleep(0.1) # Give a bit more time for transport to close fully
+            await server._perform_final_data_flush(test_specific_session_factory)
+            print("Test fixture: Final data flush completed.")
+        except Exception as e:
+            print(f"Test fixture: Error during final data flush: {e}")
+
+        await asyncio.sleep(0.2) # Give a bit more time for cleanup
+        print("Test fixture: Teardown complete.")
 
 
 @pytest.fixture(autouse=True)
