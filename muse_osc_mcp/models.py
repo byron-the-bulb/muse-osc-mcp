@@ -60,7 +60,7 @@ class Session(Base):
 
 
 class EegSample(Base):
-    """EEG sample at 256 Hz (Muse 2/2016 has 4 channels; Muse S has 5)."""
+    """EEG sample at 256 Hz (4 main channels + up to 4 auxiliary)."""
 
     __tablename__ = "eeg_samples"
 
@@ -73,7 +73,10 @@ class EegSample(Base):
     af7: Mapped[float] = mapped_column(Float)
     af8: Mapped[float] = mapped_column(Float)
     tp10: Mapped[float] = mapped_column(Float)
-    aux: Mapped[float | None] = mapped_column(Float)
+    aux_1: Mapped[float | None] = mapped_column(Float)
+    aux_2: Mapped[float | None] = mapped_column(Float)
+    aux_3: Mapped[float | None] = mapped_column(Float)
+    aux_4: Mapped[float | None] = mapped_column(Float)
 
     session: Mapped[Session] = relationship(back_populates="eeg_samples")
 
@@ -107,7 +110,7 @@ class FrequencyAbsoluteSample(Base):
 
     Mind Monitor emits *separate* OSC messages per band (e.g. `/muse/elements/delta_absolute`).
     We normalise them into a single row with the `band` column naming the band.
-    Each message provides four floats (TP9, AF7, AF8, TP10).
+    Each message provides either four floats (TP9, AF7, AF8, TP10) or a single average value.
     """
 
     __tablename__ = "freq_abs_samples"
@@ -117,10 +120,11 @@ class FrequencyAbsoluteSample(Base):
     timestamp: Mapped[_dt.datetime] = mapped_column(sa.DateTime(timezone=True), index=True)
 
     band: Mapped[str] = mapped_column(String(8), index=True)  # e.g., "delta", "theta"
-    tp9: Mapped[float] = mapped_column(Float)
-    af7: Mapped[float] = mapped_column(Float)
-    af8: Mapped[float] = mapped_column(Float)
-    tp10: Mapped[float] = mapped_column(Float)
+    avg_value: Mapped[float | None] = mapped_column(Float)
+    tp9: Mapped[float | None] = mapped_column(Float)
+    af7: Mapped[float | None] = mapped_column(Float)
+    af8: Mapped[float | None] = mapped_column(Float)
+    tp10: Mapped[float | None] = mapped_column(Float)
 
     session: Mapped[Session] = relationship(back_populates="freq_abs_samples")
 

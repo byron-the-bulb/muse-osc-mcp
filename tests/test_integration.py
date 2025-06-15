@@ -217,7 +217,7 @@ async def test_eeg_accel_flow(running_server):  # type: ignore[missing-type-doc]
 
     # Verify counts
     start_query_time = time.perf_counter()
-    test_specific_session_factory = await db.get_async_session_factory() # Get the (monkeypatched) factory
+    test_specific_session_factory = db.get_async_session_factory() # Get the (monkeypatched) factory
     async with test_specific_session_factory() as s:
         eeg_count = (await s.execute(select(func.count(models.EegSample.id)))).scalar_one()
         acc_count = (await s.execute(select(func.count(models.AccelerometerSample.id)))).scalar_one()
@@ -276,7 +276,7 @@ async def test_direct_db_commit_performance(db_session_for_test: tuple[AsyncSess
         eeg_sample = models.EegSample(
             session_id=recording.id,
             timestamp=dt.datetime.now(dt.timezone.utc),
-            tp9=1.0, af7=1.0, af8=1.0, tp10=1.0, aux=1.0
+            tp9=1.0, af7=1.0, af8=1.0, tp10=1.0, aux_1=1.0
         )
         db_add_start_time_eeg = time.perf_counter()
         s.add(eeg_sample)
@@ -300,4 +300,102 @@ async def test_direct_db_commit_performance(db_session_for_test: tuple[AsyncSess
         assert count >= 1, "Expected at least one EegSample to be committed in the test"
     # The assertion above (inside the 'assert_s' context) is sufficient.
     # Using the stale 's' session here would be incorrect and cause SAWarnings.
+
+
+@pytest.mark.asyncio
+async def test_stress_high_volume_mixed_messages(running_server):
+    """Tests sending a high volume of mixed OSC messages and verifies DB persistence."""
+    print()  # Add a newline for better log readability
+    port = running_server
+    client = SimpleUDPClient("127.0.0.1", port)
+
+    num_eeg = 500
+    num_acc = 250
+    num_freq_alpha = 50
+    num_freq_beta = 50
+    num_freq_delta = 50
+    num_freq_gamma = 50
+    num_freq_theta = 50
+    total_freq_abs = num_freq_alpha + num_freq_beta + num_freq_delta + num_freq_gamma + num_freq_theta # 250
+    num_horseshoe = 100
+    num_touching_forehead = 50
+    num_blink = 30
+    num_jaw_clench = 20
+
+    total_messages_sent = num_eeg + num_acc + total_freq_abs + num_horseshoe + num_touching_forehead + num_blink + num_jaw_clench
+    print(f"Stress Test: Preparing to send {total_messages_sent} messages.")
+
+    send_start_time = time.perf_counter()
+
+    # EEG
+    for _ in range(num_eeg):
+        client.send_message("/muse/eeg", [random.uniform(-100.0, 100.0) for _ in range(5)])
+    # Accelerometer
+    for _ in range(num_acc):
+        client.send_message("/muse/acc", [random.uniform(-1.0, 1.0) for _ in range(3)])
+    # Frequency Absolute (mix)
+    for _ in range(num_freq_alpha):
+        client.send_message("/muse/elements/alpha_absolute", [random.uniform(0, 1.0) for _ in range(4)])
+    for _ in range(num_freq_beta):
+        client.send_message("/muse/elements/beta_absolute", [random.uniform(0, 1.0) for _ in range(4)])
+    for _ in range(num_freq_delta):
+        client.send_message("/muse/elements/delta_absolute", [random.uniform(0, 1.0) for _ in range(4)])
+    for _ in range(num_freq_gamma):
+        client.send_message("/muse/elements/gamma_absolute", [random.uniform(0, 1.0) for _ in range(4)])
+    for _ in range(num_freq_theta):
+        client.send_message("/muse/elements/theta_absolute", [random.uniform(0, 1.0) for _ in range(4)])
+    # Horseshoe
+    for _ in range(num_horseshoe):
+        client.send_message("/muse/elements/horseshoe", [random.uniform(0, 4.0) for _ in range(4)])
+    # Touching Forehead
+    for _ in range(num_touching_forehead):
+        client.send_message("/muse/elements/touching_forehead", [random.randint(0, 1)])
+    # Blink
+    for _ in range(num_blink):
+        client.send_message("/muse/elements/blink", [1])
+    # Jaw Clench
+    for _ in range(num_jaw_clench):
+        client.send_message("/muse/elements/jaw_clench", [1])
+
+    send_duration = time.perf_counter() - send_start_time
+    print(f"Stress Test: Sent {total_messages_sent} OSC messages in {send_duration:.4f} seconds.")
+
+    # Wait for processing. The running_server fixture performs a final flush.
+    wait_time_for_batches = config.settings.batch_interval_seconds * 3 + 2.0 # e.g., 1*3 + 2 = 5 seconds
+    print(f"Stress Test: Waiting {wait_time_for_batches:.2f}s for batch processing and final flush...")
+    await asyncio.sleep(wait_time_for_batches)
+    print("Stress Test: Wait complete. Verifying database counts.")
+
+    # Verification
+    query_start_time = time.perf_counter()
+    test_specific_session_factory = await db.()
+    async with test_specific_session_factory() as s:
+        eeg_count = (await s.execute(select(func.count(models.EegSample.id)))).scalar_one()
+        acc_count = (await s.execute(select(func.count(models.AccelerometerSample.id)))).scalar_one()
+        freq_abs_count = (await s.execute(select(func.count(models.FrequencyAbsoluteSample.id)))).scalar_one()
+        horseshoe_count = (await s.execute(select(func.count(models.HorseshoeSample.id)))).scalar_one()
+        touching_forehead_count = (await s.execute(select(func.count(models.TouchingForeheadSample.id)))).scalar_one()
+        blink_count = (await s.execute(select(func.count(models.BlinkEvent.id)))).scalar_one()
+        jaw_clench_count = (await s.execute(select(func.count(models.JawClenchEvent.id)))).scalar_one()
+    query_duration = time.perf_counter() - query_start_time
+    print(f"Stress Test: DB query duration: {query_duration:.4f} seconds.")
+
+    print(f"Stress Test: Expected EEG: {num_eeg}, Got: {eeg_count}")
+    print(f"Stress Test: Expected ACC: {num_acc}, Got: {acc_count}")
+    print(f"Stress Test: Expected FreqAbs: {total_freq_abs}, Got: {freq_abs_count}")
+    print(f"Stress Test: Expected Horseshoe: {num_horseshoe}, Got: {horseshoe_count}")
+    print(f"Stress Test: Expected TouchingForehead: {num_touching_forehead}, Got: {touching_forehead_count}")
+    print(f"Stress Test: Expected Blink: {num_blink}, Got: {blink_count}")
+    print(f"Stress Test: Expected JawClench: {num_jaw_clench}, Got: {jaw_clench_count}")
+
+    assert eeg_count == num_eeg
+    assert acc_count == num_acc
+    assert freq_abs_count == total_freq_abs
+    assert horseshoe_count == num_horseshoe
+    assert touching_forehead_count == num_touching_forehead
+    assert blink_count == num_blink
+    assert jaw_clench_count == num_jaw_clench
+
+    print("Stress Test: All counts verified successfully.")
+
 

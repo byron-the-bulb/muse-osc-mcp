@@ -3,9 +3,9 @@ name = "muse_osc_mcp"
 version = "0.1.0"
 description = "MCP server to record Muse EEG OSC data into PostgreSQL (AWS Aurora)"
 readme = "README.md"
-requires-python = ">=3.10"
-authors = [{ name = "Your Name", email = "you@example.com" }]
-license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Massimo Bardetti", email = "byron.the.bulb@gmail.com" }]
+license = "MIT"
 
 # Core runtime dependencies
 dependencies = [
@@ -18,7 +18,8 @@ dependencies = [
     "greenlet>=2.0",
 
     # MCP SDK – use main branch until versioned release
-    "mcp @ git+https://github.com/modelcontextprotocol/python-sdk"
+    "mcp @ git+https://github.com/modelcontextprotocol/python-sdk",
+    "enrichmcp @ git+https://github.com/featureform/enrichmcp.git"
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,14 @@ dev = [
     "pytest-asyncio",
     "pytest-dotenv",
 ]
+
+[project.scripts]
+muse-osc-mcp = "muse_osc_mcp.mcp:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["muse_osc_mcp*"]
+exclude = ["manual_tests*"]
 
 [build-system]
 requires = ["setuptools>=64", "wheel"]

@@ -203,7 +203,7 @@ BAND_MAP: Final[dict[str, str]] = {
 
 
 async def create_recording_session() -> RecordingSession: # Renamed to avoid confusion
-    session_factory = await get_async_session_factory()
+    session_factory = get_async_session_factory()
     async with session_factory() as db_session:
         sess = RecordingSession(user="unknown", started_at=dt.datetime.now(dt.timezone.utc))
         db_session.add(sess)
@@ -216,18 +216,29 @@ async def create_recording_session() -> RecordingSession: # Renamed to avoid con
 async def handle_eeg(osc_address: str, osc_params: tuple, rec_id: int) -> None:
     global eeg_samples_buffer
     handler_start_time = time.perf_counter()
-    try:
-        tp9, af7, af8, tp10, aux = osc_params
-    except ValueError:
+
+    num_params = len(osc_params)
+    if not (4 <= num_params <= 8):
         logger.warning(
-            "Received EEG message with incorrect number of parameters. Expected 5, got %s. Message: %s %s",
-            len(osc_params), osc_address, osc_params,
+            "Received EEG message with incorrect number of parameters. Expected 4-8, got %s. Message: %s %s",
+            num_params, osc_address, osc_params,
         )
         return
 
+    # Unpack main channels and up to 4 aux channels
+    tp9, af7, af8, tp10, *aux_channels = osc_params
+    
+    aux_values = [float(v) if v is not None else None for v in aux_channels]
+    # Pad with Nones to ensure there are always 4 aux values
+    aux_values.extend([None] * (4 - len(aux_values)))
+
     eeg_sample = EegSample(
         session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc),
-        tp9=float(tp9), af7=float(af7), af8=float(af8), tp10=float(tp10), aux=float(aux),
+        tp9=float(tp9), af7=float(af7), af8=float(af8), tp10=float(tp10),
+        aux_1=aux_values[0],
+        aux_2=aux_values[1],
+        aux_3=aux_values[2],
+        aux_4=aux_values[3],
     )
     eeg_samples_buffer.append(eeg_sample)
     handler_duration = time.perf_counter() - handler_start_time
@@ -258,18 +269,30 @@ async def handle_acc(osc_address: str, osc_params: tuple, rec_id: int) -> None:
 async def handle_band(osc_address: str, osc_params: tuple, rec_id: int, band: str) -> None:
     global freq_abs_samples_buffer
     handler_start_time = time.perf_counter()
-    try:
-        tp9, af7, af8, tp10 = osc_params
-    except ValueError:
+    
+    num_params = len(osc_params)
+    avg_value, tp9, af7, af8, tp10 = None, None, None, None, None
+
+    if num_params == 1:
+        avg_value = float(osc_params[0])
+    elif num_params == 4:
+        tp9, af7, af8, tp10 = (float(p) for p in osc_params)
+    else:
         logger.warning(
-            "Received BAND message (%s) with incorrect number of parameters. Expected 4, got %s. Message: %s %s",
-            band, len(osc_params), osc_address, osc_params,
+            f"Received BAND message ({band}) with incorrect number of parameters. "
+            f"Expected 1 or 4, got {num_params}. Message: {osc_address} {osc_params}"
         )
         return
-    
+
     freq_sample = FrequencyAbsoluteSample(
-        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), band=band,
-        tp9=float(tp9), af7=float(af7), af8=float(af8), tp10=float(tp10),
+        session_id=rec_id,
+        timestamp=dt.datetime.now(dt.timezone.utc),
+        band=band,
+        avg_value=avg_value,
+        tp9=tp9,
+        af7=af7,
+        af8=af8,
+        tp10=tp10,
     )
     freq_abs_samples_buffer.append(freq_sample)
     handler_duration = time.perf_counter() - handler_start_time
@@ -310,7 +333,7 @@ async def handle_touching(osc_address: str, osc_params: tuple, rec_id: int) -> N
         return
 
     touching_sample = TouchingForeheadSample(
-        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), status=bool(val),
+        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), value=bool(val),
     )
     touching_forehead_samples_buffer.append(touching_sample)
     handler_duration = time.perf_counter() - handler_start_time
@@ -330,7 +353,7 @@ async def handle_blink(osc_address: str, osc_params: tuple, rec_id: int) -> None
         return
 
     blink_event = BlinkEvent(
-        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), is_blinking=bool(val),
+        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), strength=float(val),
     )
     blink_events_buffer.append(blink_event)
     handler_duration = time.perf_counter() - handler_start_time
@@ -350,7 +373,7 @@ async def handle_jaw(osc_address: str, osc_params: tuple, rec_id: int) -> None:
         return
 
     jaw_event = JawClenchEvent(
-        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), is_clenching=bool(val),
+        session_id=rec_id, timestamp=dt.datetime.now(dt.timezone.utc), strength=float(val),
     )
     jaw_clench_events_buffer.append(jaw_event)
     handler_duration = time.perf_counter() - handler_start_time
@@ -456,7 +479,7 @@ async def main() -> None:
         rec_session = await create_recording_session()
 
         current_loop = asyncio.get_running_loop()
-        default_session_factory = await get_async_session_factory()
+        default_session_factory = get_async_session_factory()
 
         # Start the batch commit task
         global batch_commit_task_handle

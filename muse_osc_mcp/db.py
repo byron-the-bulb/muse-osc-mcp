@@ -5,6 +5,7 @@ import asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from enrichmcp.sqlalchemy import EnrichSQLAlchemyMixin
 from sqlalchemy import MetaData
 
 from .config import settings
@@ -22,14 +23,14 @@ convention = {
 metadata = MetaData(naming_convention=convention)
 
 
-class Base(DeclarativeBase):
+class Base(DeclarativeBase, EnrichSQLAlchemyMixin):
     metadata = metadata  # type: ignore[assignment]
 
 
 _engine: create_async_engine | None = None
 _async_session_factory: async_sessionmaker[AsyncSession] | None = None
 
-async def initialize_global_db() -> None:
+def initialize_global_db() -> None:
     """Initializes the global engine and session factory if they haven't been already."""
     global _engine, _async_session_factory
     if _engine is None:
@@ -42,7 +43,7 @@ async def initialize_global_db() -> None:
         )
         _async_session_factory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
 
-async def get_engine() -> create_async_engine:
+def get_engine() -> create_async_engine:
     """Returns the global async engine. Assumes initialize_global_db() has been called."""
     if _engine is None:
         raise RuntimeError(
@@ -50,7 +51,7 @@ async def get_engine() -> create_async_engine:
         )
     return _engine
 
-async def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
+def get_async_session_factory() -> async_sessionmaker[AsyncSession]:
     """Returns the global async session factory. Assumes initialize_global_db() has been called."""
     if _async_session_factory is None:
         raise RuntimeError(
@@ -93,7 +94,15 @@ async def warm_up_connection_pool(engine: create_async_engine, num_connections: 
 
 
 async def init_db() -> None:
-    """Create tables (dev only). In production use Alembic migrations."""
+    """Drop and re-create tables (dev/test only). In production use Alembic migrations."""
+    # Safeguard to prevent running in production
+    if getattr(settings, "app_env", "dev").lower() == "production":
+        raise RuntimeError(
+            "Refusing to drop and re-create tables in a production environment. "
+            'Use Alembic migrations for production schema changes.'
+        )
+
     current_engine = await get_engine()
     async with current_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
