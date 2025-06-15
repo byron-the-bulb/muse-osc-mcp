@@ -22,13 +22,7 @@ uv venv
 source .venv/bin/activate
 uv pip install -r requirements.txt  # or `uv pip install -e .` if using pyproject
 
-# Set database connection (adjust as needed)
-export DATABASE_HOST=10.0.33.131
-export DATABASE_PORT=5432
-export DATABASE_NAME=muse
-export DATABASE_USERNAME=muse_prod
-export DATABASE_PASSWORD=muse2025
-export OSC_PORT=5000
+
 
 # Run the server (placeholder)
 python -m muse_osc_mcp.server
@@ -43,10 +37,3 @@ python -m muse_osc_mcp.server
 └── .gitignore
 ```
 
-## TODO (roadmap)
-- [ ] Database schema (sessions, high-rate sample tables)
-- [ ] OSC receiver and decoder
-- [ ] MCP server registration & endpoints
-- [ ] Recording pipeline to Postgres
-- [ ] CI / lint / tests
-```

@@ -63,7 +63,6 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
     logger.info(f"Batch commit task started. Commit interval: {interval_seconds}s")
     while True:
         flush_type = "Periodic" if interval_seconds > 0 else "Immediate/Final"
-        print(f"[BCD] {flush_type} flush cycle starting...")
         logger.info(f"{flush_type} flush cycle starting...")
 
         if interval_seconds > 0:
@@ -79,35 +78,35 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
         items_to_commit_jaw_clench: List[JawClenchEvent] = []
 
         # Atomically get and clear buffers
-        print(f"[BCD] {flush_type} flush: Checking buffers.")
+        logger.info(f"{flush_type} flush: Checking buffers.")
         if eeg_samples_buffer:
             items_to_commit_eeg = list(eeg_samples_buffer)
             eeg_samples_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_eeg)} EEG samples from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_eeg)} EEG samples from buffer.")
         if acc_samples_buffer:
             items_to_commit_acc = list(acc_samples_buffer)
             acc_samples_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_acc)} ACC samples from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_acc)} ACC samples from buffer.")
         if freq_abs_samples_buffer:
             items_to_commit_freq_abs = list(freq_abs_samples_buffer)
             freq_abs_samples_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_freq_abs)} FreqAbs samples from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_freq_abs)} FreqAbs samples from buffer.")
         if horseshoe_samples_buffer:
             items_to_commit_horseshoe = list(horseshoe_samples_buffer)
             horseshoe_samples_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_horseshoe)} Horseshoe samples from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_horseshoe)} Horseshoe samples from buffer.")
         if touching_forehead_samples_buffer:
             items_to_commit_touching_forehead = list(touching_forehead_samples_buffer)
             touching_forehead_samples_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_touching_forehead)} TouchingForehead samples from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_touching_forehead)} TouchingForehead samples from buffer.")
         if blink_events_buffer:
             items_to_commit_blink = list(blink_events_buffer)
             blink_events_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_blink)} Blink events from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_blink)} Blink events from buffer.")
         if jaw_clench_events_buffer:
             items_to_commit_jaw_clench = list(jaw_clench_events_buffer)
             jaw_clench_events_buffer.clear()
-            print(f"[BCD] {flush_type} flush: Copied {len(items_to_commit_jaw_clench)} JawClench events from buffer.")
+            logger.info(f"{flush_type} flush: Copied {len(items_to_commit_jaw_clench)} JawClench events from buffer.")
 
         total_items_in_batch = (
             len(items_to_commit_eeg) + len(items_to_commit_acc) + len(items_to_commit_freq_abs) +
@@ -115,13 +114,12 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
             len(items_to_commit_blink) + len(items_to_commit_jaw_clench)
         )
 
-        print(f"[BCD] {flush_type} flush: Total items copied from all buffers: {total_items_in_batch}")
+        logger.info(f"{flush_type} flush: Total items copied from all buffers: {total_items_in_batch}")
         if not total_items_in_batch:
             if interval_seconds == 0: # If it's an immediate flush, break after checking buffers once
-                print(f"[BCD] {flush_type} flush: No data in buffers to commit. Breaking loop for immediate flush.")
                 logger.info("Immediate flush: No data in buffers to commit.")
                 break
-            print(f"[BCD] {flush_type} flush: No data in buffers to commit. Continuing to next cycle.")
+            logger.info(f"{flush_type} flush: No data in buffers to commit. Continuing to next cycle.")
             # logger.debug("No data in buffers to commit.") # Can be noisy for periodic checks
             continue
 
@@ -153,11 +151,12 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                     num_committed_types +=1
                 
                 if num_committed_types > 0:
-                    print(f"[BCD] {flush_type} flush: Attempting to commit {total_items_in_batch} items to DB...")
+                    logger.info(f"{flush_type} flush: Attempting to commit {total_items_in_batch} items to DB...")
                     await db_session.commit()
+                    await db_session.expire_all() # Mark all objects as stale
                     commit_duration = time.perf_counter() - commit_start_time
-                    print(
-                        f"[BCD] {flush_type} flush: Successfully committed {len(items_to_commit_eeg)} EEG, {len(items_to_commit_acc)} ACC, "
+                    logger.info(
+                        f"{flush_type} flush: Successfully committed {len(items_to_commit_eeg)} EEG, {len(items_to_commit_acc)} ACC, "
                         f"{len(items_to_commit_freq_abs)} FreqAbs, {len(items_to_commit_horseshoe)} Horseshoe, "
                         f"{len(items_to_commit_touching_forehead)} Touch, {len(items_to_commit_blink)} Blink, "
                         f"{len(items_to_commit_jaw_clench)} Jaw Clench items. Total: {total_items_in_batch} in {commit_duration:.4f}s."
@@ -169,12 +168,10 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                         f"{len(items_to_commit_jaw_clench)} Jaw Clench items. Total: {total_items_in_batch} in {commit_duration:.4f}s."
                     )
                 else:
-                    print(f"[BCD] {flush_type} flush: All buffers were empty after swapping, no commit needed.")
-                    logger.debug("Batch commit: All buffers were empty after swapping.")
+                    logger.info(f"{flush_type} flush: All buffers were empty after swapping, no commit needed.")
 
             except asyncio.CancelledError:
-                print(f"[BCD] {flush_type} flush: Task cancelled during DB operations. Re-buffering {total_items_in_batch} items.")
-                logger.info("Batch commit task cancelled during DB operations. Re-buffering data.")
+                logger.info(f"{flush_type} flush: Task cancelled during DB operations. Re-buffering {total_items_in_batch} items.")
                 # Re-add data to buffers if cancelled mid-operation to prevent data loss
                 eeg_samples_buffer = items_to_commit_eeg + eeg_samples_buffer
                 acc_samples_buffer = items_to_commit_acc + acc_samples_buffer
@@ -185,12 +182,10 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                 jaw_clench_events_buffer = items_to_commit_jaw_clench + jaw_clench_events_buffer
                 raise # Re-raise CancelledError to ensure task stops
             except Exception as e:  # pylint: disable=broad-except
-                print(f"[BCD] {flush_type} flush: EXCEPTION during batch commit: {e}. Data for this batch may be lost.")
-                logger.exception("Error during batch commit. Data for this batch may be lost.")
+                logger.exception(f"{flush_type} flush: EXCEPTION during batch commit: {e}. Data for this batch may be lost.")
         
         if interval_seconds == 0: # If it's an immediate flush, break after one attempt
-            print(f"[BCD] {flush_type} flush: Immediate flush attempt complete. Breaking loop.")
-            logger.info("Immediate flush attempt complete.")
+            logger.info(f"{flush_type} flush: Immediate flush attempt complete. Breaking loop.")
             break
 
 BAND_MAP: Final[dict[str, str]] = {
@@ -212,6 +207,14 @@ async def create_recording_session() -> RecordingSession: # Renamed to avoid con
         logger.info("Created recording session id=%s", sess.id)
         return sess
 
+async def end_recording_session(session: RecordingSession) -> None:
+    session_factory = get_async_session_factory()
+    async with session_factory() as db_session:
+        session.ended_at = dt.datetime.now(dt.timezone.utc)
+        db_session.add(session) # Add session to the current db_session to track changes
+        await db_session.commit() # Persist changes to the database
+        await db_session.refresh(session) # Refresh to get the latest state from DB
+        logger.info("Ended recording session id=%s", session.id)
 
 async def handle_eeg(osc_address: str, osc_params: tuple, rec_id: int) -> None:
     global eeg_samples_buffer
@@ -426,7 +429,7 @@ async def start_osc_server(
     osc_udp_server = AsyncIOOSCUDPServer(("0.0.0.0", port), dispatcher, loop)
     transport, protocol = await osc_udp_server.create_serve_endpoint()
     logger.info("OSC server ready and listening on port %s", port)
-
+    
     try:
         # Keep the server running until it's cancelled
         await asyncio.Future() # This will wait indefinitely
@@ -444,6 +447,61 @@ async def create_aiohttp_app() -> web.Application: # Renamed for clarity
     app.router.add_get("/health", lambda _: web.json_response({"status": "ok"}))
     return app
 
+async def start_osc_handler(rec_session: RecordingSession) -> asyncio.Task:
+    current_loop = asyncio.get_running_loop()
+    default_session_factory = get_async_session_factory()
+
+    # Start the batch commit task
+    global batch_commit_task_handle
+    # Ensure settings.batch_interval_seconds is available (add to config.py)
+    batch_interval = getattr(settings, 'batch_interval_seconds', 1.0) # Default to 1s if not in settings
+    batch_commit_task_handle = asyncio.create_task(
+        batch_commit_data(default_session_factory, batch_interval)
+    )
+
+    osc_server_task = asyncio.create_task(
+        start_osc_server(settings.osc_port, rec_session, current_loop, default_session_factory)
+    )
+
+    # Optional: run aiohttp health server
+    #aio_app = await create_aiohttp_app()
+    #runner = web.AppRunner(aio_app)
+    #await runner.setup()
+    #site = web.TCPSite(runner, "0.0.0.0", 8080) # Standard port for such health checks
+    #await site.start()
+    #logger.info("AIOHTTP health server running on http://0.0.0.0:8080/health")
+    #logger.info("Muse OSC MCP server fully running (recording session id=%s)", rec_session.id)
+
+    return osc_server_task
+
+async def stop_osc_handler(osc_server_task: asyncio.Task) -> None:
+    if batch_commit_task_handle and not batch_commit_task_handle.done():
+        logger.info("Cancelling batch commit task...")
+        batch_commit_task_handle.cancel()
+        try:
+            await batch_commit_task_handle
+        except asyncio.CancelledError:
+            logger.info("Batch commit task cancelled. Final flush will run.")
+        except Exception:
+            logger.exception("Exception during batch commit task cancellation/shutdown.")
+        
+    # Flush any remaining data in buffers before exiting
+    logger.info("Flushing remaining data from buffers before shutdown...")
+    try:
+        # Use a short timeout for the final flush to prevent hanging indefinitely
+        await asyncio.wait_for(batch_commit_data(get_async_session_factory(), interval_seconds=0), timeout=10.0)
+        logger.info("Final data flush complete.")
+    except asyncio.TimeoutError:
+        logger.error("Timeout during final data flush. Some data may not have been saved.")
+    except Exception:
+        logger.exception("Error during final data flush.")
+
+    if osc_server_task and not osc_server_task.done():
+        osc_server_task.cancel()
+        try:
+            await osc_server_task
+        except asyncio.CancelledError:
+            logger.info("OSC server task successfully cancelled.")
 
 async def main() -> None:
     global batch_commit_task_handle # Declare global at the start of the function
@@ -478,29 +536,7 @@ async def main() -> None:
         # Rest of the code remains the same
         rec_session = await create_recording_session()
 
-        current_loop = asyncio.get_running_loop()
-        default_session_factory = get_async_session_factory()
-
-        # Start the batch commit task
-        global batch_commit_task_handle
-        # Ensure settings.batch_interval_seconds is available (add to config.py)
-        batch_interval = getattr(settings, 'batch_interval_seconds', 1.0) # Default to 1s if not in settings
-        batch_commit_task_handle = asyncio.create_task(
-            batch_commit_data(default_session_factory, batch_interval)
-        )
-
-        osc_server_task = asyncio.create_task(
-            start_osc_server(settings.osc_port, rec_session, current_loop, default_session_factory)
-        )
-
-        # Optional: run aiohttp health server
-        aio_app = await create_aiohttp_app()
-        runner = web.AppRunner(aio_app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", 8080) # Standard port for such health checks
-        await site.start()
-        logger.info("AIOHTTP health server running on http://0.0.0.0:8080/health")
-        logger.info("Muse OSC MCP server fully running (recording session id=%s)", rec_session.id)
+        osc_server_task = await start_osc_handler(rec_session)
 
         await osc_server_task # Keep main alive until OSC server task finishes or is cancelled
 

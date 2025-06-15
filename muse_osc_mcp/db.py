@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 from enrichmcp.sqlalchemy import EnrichSQLAlchemyMixin
 from sqlalchemy import MetaData
+from logging import getLogger
 
 from .config import settings
 
+logger = getLogger(__name__)
 
 # Use naming convention for alembic friendliness
 convention = {
@@ -74,23 +76,22 @@ async def warm_up_connection_pool(engine: create_async_engine, num_connections: 
     """
     if not engine:
         # Or raise an error, or log a warning
-        print("Engine not available for pool warming.") # Consider using logger
+        logger.warning("Engine not available for pool warming.")
         return
 
-    print(f"Warming up {num_connections} connections in the pool...") # Consider using logger
+    logger.info(f"Warming up {num_connections} connections in the pool...")
     warmup_tasks = []
     for i in range(num_connections):
         async def _warm_conn(idx: int):
             try:
                 async with engine.connect() as conn:
                     await conn.execute(select(1))
-                    # print(f"Connection {idx+1} warmed up and returned to pool.") # Consider using logger
             except Exception as e:
-                print(f"Error warming up connection {idx+1}: {e}") # Consider using logger
+                logger.warning(f"Error warming up connection {idx+1}: {e}")
         warmup_tasks.append(_warm_conn(i))
     
     await asyncio.gather(*warmup_tasks)
-    print(f"Connection pool warming completed for {num_connections} connections.") # Consider using logger
+    logger.info(f"Connection pool warming completed for {num_connections} connections.")
 
 
 async def init_db() -> None:

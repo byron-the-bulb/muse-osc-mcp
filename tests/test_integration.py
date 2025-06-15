@@ -368,7 +368,7 @@ async def test_stress_high_volume_mixed_messages(running_server):
 
     # Verification
     query_start_time = time.perf_counter()
-    test_specific_session_factory = await db.()
+    test_specific_session_factory = await db.get_async_session_factory()
     async with test_specific_session_factory() as s:
         eeg_count = (await s.execute(select(func.count(models.EegSample.id)))).scalar_one()
         acc_count = (await s.execute(select(func.count(models.AccelerometerSample.id)))).scalar_one()
