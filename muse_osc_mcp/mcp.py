@@ -37,7 +37,7 @@ os.environ["APP_ENV_FILE"] = ".env"
 LOGS_DIR = "logs"
 MAX_LOG_FILES = 20
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-LOG_LEVEL = logging.DEBUG
+LOG_LEVEL = logging.INFO
 
 def setup_logging():
     """Initializes timestamped, rolling file logging."""
@@ -137,7 +137,7 @@ async def start_session(user: str, description: str | None = None) -> int:
     """Start a new EEG recording session. Returns the session ID."""
     global osc_server_task
     global rec_session
-    rec_session = await create_recording_session()
+    rec_session = await create_recording_session(user=user, description=description)
     osc_server_task = await start_osc_handler(rec_session)
     return rec_session.id
 

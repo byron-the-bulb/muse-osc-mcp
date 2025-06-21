@@ -153,7 +153,7 @@ async def batch_commit_data(session_factory: async_sessionmaker[AsyncSession], i
                 if num_committed_types > 0:
                     logger.info(f"{flush_type} flush: Attempting to commit {total_items_in_batch} items to DB...")
                     await db_session.commit()
-                    await db_session.expire_all() # Mark all objects as stale
+                    db_session.expire_all()
                     commit_duration = time.perf_counter() - commit_start_time
                     logger.info(
                         f"{flush_type} flush: Successfully committed {len(items_to_commit_eeg)} EEG, {len(items_to_commit_acc)} ACC, "
@@ -197,10 +197,10 @@ BAND_MAP: Final[dict[str, str]] = {
 }
 
 
-async def create_recording_session() -> RecordingSession: # Renamed to avoid confusion
+async def create_recording_session(user: str="unknown", description: str | None = None) -> RecordingSession: # Renamed to avoid confusion
     session_factory = get_async_session_factory()
     async with session_factory() as db_session:
-        sess = RecordingSession(user="unknown", started_at=dt.datetime.now(dt.timezone.utc))
+        sess = RecordingSession(user=user, description=description, started_at=dt.datetime.now(dt.timezone.utc))
         db_session.add(sess)
         await db_session.commit()
         await db_session.refresh(sess)
